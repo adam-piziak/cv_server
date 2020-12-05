@@ -83,16 +83,24 @@ class GameState():
         self.players[host] = PlayerState(host, 0, True, "HOST", False)
 
     def play_card(self, player_key, card):
+        player = self.players[player_key]
+        c = Card(card)
+        first_suit = self.trump_suit
+        if len(self.round_cards) > 0:
+            first_suit = Card(self.round_cards[0]).suit
+
         if self.players[player_key].position != self.turn_player:
             return False
 
         if not self.round_cards:
             self.round_cards.append(card)
             self.players[player_key].play_card(card)
-        elif Card(card).suit == self.trump_suit:
+        elif player.has_suit(first_suit) and c.suit != first_suit:
+            return False
+        elif c.suit == Card(self.round_cards[0]).suit:
             self.round_cards.append(card)
             self.players[player_key].play_card(card)
-        elif Card(card).suit == Card(self.round_cards[0]).suit:
+        elif Card(card).suit == self.trump_suit:
             self.round_cards.append(card)
             self.players[player_key].play_card(card)
         elif not self.players[player_key].has_suit(Card(self.round_cards[0]).suit):
@@ -127,7 +135,7 @@ class GameState():
                 #
                 game_state = jsonify(game_state=self.serialize()).get_data(as_text=True)
                 emit("game_state", game_state, room=self.key)
-                time.sleep(.5)
+                time.sleep(.3)
                 #
                 result = self.play_card(turn_player.key, turn_player.cards[i])
                 if result:
@@ -147,7 +155,7 @@ class GameState():
         #
         game_state = jsonify(game_state=self.serialize()).get_data(as_text=True)
         emit("game_state", game_state, room=self.key)
-        time.sleep(2)
+        time.sleep(1)
         #
         winning_idx = 0 # Winning player index
         highest_value = 0
@@ -156,15 +164,15 @@ class GameState():
         cards = list(map(lambda c: Card(c), self.round_cards))
         first_suit = cards[0].suit
         for i in range(4):
-            if cards[i].suit != first_suit:
+            if cards[i].suit != first_suit and cards[i].suit != self.trump_suit:
                 continue
+            if trump_played and cards[i].suit != self.trump_suit:
+                continue
+
             if not trump_played and cards[i].suit == self.trump_suit:
                 trumpPlayed = True
                 highestVal = cards[i].val
                 winning_idx = i
-
-            if trump_played and cards[i].suit != self.trump_suit:
-                continue
 
             if cards[i].val > highest_value:
                 winning_idx = i
@@ -178,6 +186,11 @@ class GameState():
                 self.turn_player = val.position
                 self.round_cards = []
                 self.players[key].give_point()
+                if len(self.players[key].cards) == 0:
+                    self.declare_winner(key)
+
+    def declare_winner(self, player_key):
+        emit("winner", player_key)
 
     def deal_cards(self):
         deck = list(range(52))
