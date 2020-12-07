@@ -3,9 +3,11 @@ from flask.json import JSONEncoder
 from flask_socketio import SocketIO, join_room, leave_room, send, emit
 from flask_cors import CORS
 import random
+import numpy as np
 import shortuuid
 import math
 import time
+from arch import contract
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -33,8 +35,9 @@ class PlayerState():
         self.position = num
         self.tricks_won = 0
         self.name = name
-        self.is_bot = is_bot
+        self.is_bot = True
         self.cards = []
+        self.dummy = False
 
     def set_cards(self, cards):
         self.cards = cards
@@ -71,41 +74,53 @@ def chunks(l, n):
     for i in range(0, n):
         yield l[i::n]
 
+class RoundState():
+    def __init__(self):
+        self.cards_played = 0
+        self.first_suit = -1
+
+    def new_round(self, suit):
+        self.car
+        
 class GameState():
     def __init__(self, key, host):
         self.key = key
         self.stage = STAGE_WAITING
-        self.players = {}
         self.trump_suit = SUIT_CLUBS
         self.round_cards = []
-        self.last_winner = host
+        self.last_winner = 0
         self.turn_player = 0
-        self.players[host] = PlayerState(host, 0, True, "HOST", False)
+        self.players = []
+        self.players.append(PlayerState(host, 0, True, "Host", False))
 
-    def play_card(self, player_key, card):
-        player = self.players[player_key]
-        c = Card(card)
-        first_suit = self.trump_suit
+    def get_player(self, key):
+        for p in self.players:
+            if p.key == key:
+                return p
+
+    def play_card(self, pk, c):
+        player = self.get_player(pk)
+        if player.position != self.turn_player:
+            return False
+        
+        card = Card(c)
+        first_suit = None
         if len(self.round_cards) > 0:
             first_suit = Card(self.round_cards[0]).suit
+        else:
+            first_suit = card.suit
 
-        if self.players[player_key].position != self.turn_player:
+        if len(self.round_cards):
+            self.round_cards.append(c)
+            player.play_card(c)
+        elif player.has_suit(first_suit) and card.suit != first_suit:
             return False
-
-        if not self.round_cards:
-            self.round_cards.append(card)
-            self.players[player_key].play_card(card)
-        elif player.has_suit(first_suit) and c.suit != first_suit:
-            return False
-        elif c.suit == Card(self.round_cards[0]).suit:
-            self.round_cards.append(card)
-            self.players[player_key].play_card(card)
-        elif Card(card).suit == self.trump_suit:
-            self.round_cards.append(card)
-            self.players[player_key].play_card(card)
-        elif not self.players[player_key].has_suit(Card(self.round_cards[0]).suit):
-            self.round_cards.append(card)
-            self.players[player_key].play_card(card)
+        elif card.suit == first_suit:
+            self.round_cards.append(c)
+            player.play_card(c)
+        elif not player.has_suit(first_suit):
+            self.round_cards.append(c)
+            player.play_card(c)
         else:
             return False
 
@@ -117,8 +132,7 @@ class GameState():
         return True
 
     def check_for_bots(self):
-        turn_player = next(p for p in self.players if self.players[p].position == self.turn_player)
-        turn_player = self.players[turn_player]
+        turn_player = self.players[self.turn_player]
 
         if turn_player.is_bot:
             if not self.round_cards:
@@ -135,7 +149,6 @@ class GameState():
                 #
                 game_state = jsonify(game_state=self.serialize()).get_data(as_text=True)
                 emit("game_state", game_state, room=self.key)
-                time.sleep(.3)
                 #
                 result = self.play_card(turn_player.key, turn_player.cards[i])
                 if result:
@@ -179,10 +192,10 @@ class GameState():
                 highest_value = cards[i].val
 
         winning_player_pos = (self.players[self.last_winner].position + winning_idx) % 4
-        for key, val in self.players.items():
+        for key, val in enumerate(self.players):
             self.players[key].remove_card()
             if val.position == winning_player_pos:
-                self.last_winner = key
+                self.last_winner = val.position
                 self.turn_player = val.position
                 self.round_cards = []
                 self.players[key].give_point()
@@ -197,23 +210,34 @@ class GameState():
         random.shuffle(deck)
 
         i = 0
-        for key, value in self.players.items():
+        for key, value in enumerate(self.players):
             value.set_cards(deck[i:(i+13)])
             i += 13
 
+        pl = self.players
+        n = np.array(pl[0].cards)
+        e = np.array(pl[1].cards)
+        s = np.array(pl[2].cards)
+        w = np.array(pl[3].cards)        
+        declarer, trump_suit, contract_number = contract(n,s,e,w)
+        self.stage = STAGE_PLAYING     
+
     def add_bot(self):
-        new_player = uuid()
-        self.players[new_player] = PlayerState(new_player, len(self.players), False, "BOTSKI " + str(len(self.players)), True)
+        id = uuid()
+        player = PlayerState(id, len(self.players), False, "BOTSKI " + str(len(self.players)), True)
+        self.players.append(player)
         if len(self.players) > 3:
             self.deal_cards()
             self.stage = STAGE_PLAYING
 
     def add_player(self, name):
-        new_player = uuid()
-        self.players[new_player] = PlayerState(new_player, len(self.players), False, name, False)
+        id = uuid()
+        player = PlayerState(id, len(self.players), False, name, False)
+        self.players[player.position] = player
+        
         if len(self.players) > 3:
             self.deal_cards()
-            self.stage = STAGE_PLAYING
+
         return new_player
 
     def serialize(self):
@@ -222,7 +246,7 @@ class GameState():
             'game_stage': self.stage,
             'turn_player': self.turn_player,
             'round_cards': self.round_cards,
-            'players': [p.serialize() for _, p in self.players.items()],
+            'players': [p.serialize() for _, p in enumerate(self.players)],
         }
 
 games = {}
@@ -250,7 +274,7 @@ def hello():
     key, host = create_game()
     return jsonify(
         key = key,
-        player = jsonify(player=games[key].players[host].serialize()).get_data(as_text=True)
+        player = jsonify(player=games[key].players[0].serialize()).get_data(as_text=True)
     )
 
 @app.route('/join',methods=['GET', 'POST'])
