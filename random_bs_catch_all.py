@@ -98,17 +98,6 @@ def play_round(nets,mems,test,modes):
         winner = (determine_winner(game_state,cards) + lead) % 4
         activePlayer = winner
         winner2 = (winner + 2) % 4
-        if winner == declarer or winner2 == declarer:
-            declarer_points += 1
-            if not test:
-                mems[declarer].store(inputs_old[declarer].cuda(),As[declarer],inputs[declarer].cuda(),1)
-                mems[(declarer+1)%4].store(inputs_old[(declarer+1)%4].cuda(),As[(declarer+1)%4],inputs[(declarer+1)%4].cuda(),-1)
-                mems[(declarer-1)%4].store(inputs_old[(declarer-1)%4].cuda(),As[(declarer-1)%4],inputs[(declarer-1)%4].cuda(),-1)
-        else:
-            if not test:
-                mems[declarer].store(inputs_old[declarer].cuda(),As[declarer],inputs[declarer].cuda(),-1)
-                mems[(declarer+1)%4].store(inputs_old[(declarer+1)%4].cuda(),As[(declarer+1)%4],inputs[(declarer+1)%4].cuda(),1)
-                mems[(declarer-1)%4].store(inputs_old[(declarer-1)%4].cuda(),As[(declarer-1)%4],inputs[(declarer-1)%4].cuda(),1)
 
     offset = declarer_points - (contract_number + 6)
     if offset >= 0:
